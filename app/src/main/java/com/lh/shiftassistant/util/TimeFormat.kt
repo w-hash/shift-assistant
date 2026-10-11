@@ -6,6 +6,19 @@ package com.lh.shiftassistant.util
  */
 object TimeFormat {
 
+    /**
+     * 日历事件标题(会话9 改版):优先「地点 + 时间」,便于直接看出上班地点。
+     * 未选地点时回退「班次名 + 时间」,避免出现只有时间、看不出班次的标题。
+     *
+     * 例:("晚班", "进口", 960, 1440) -> "进口 16:00-24:00"
+     *     ("晚班", null, 960, 1440)   -> "晚班 16:00-24:00"
+     *     ("晚班", "  ", 960, 1440)   -> "晚班 16:00-24:00"
+     */
+    fun eventTitle(shiftName: String, locationName: String?, startMinute: Int, endMinute: Int): String {
+        val head = locationName?.takeIf { it.isNotBlank() } ?: shiftName
+        return "$head ${formatMinute(startMinute)}-${formatMinute(endMinute)}"
+    }
+
     /** 分钟 -> "HH:mm"(1440 -> "24:00") */
     fun formatMinute(minute: Int): String {
         val m = minute.coerceIn(0, 1440)

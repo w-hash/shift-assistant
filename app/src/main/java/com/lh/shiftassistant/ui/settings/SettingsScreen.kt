@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lh.shiftassistant.AppContainer
 import com.lh.shiftassistant.BuildConfig
 import com.lh.shiftassistant.R
+import com.lh.shiftassistant.calendar.CalendarOption
 import com.lh.shiftassistant.ui.components.DashedDivider
 import com.lh.shiftassistant.ui.components.SettingsCard
 import com.lh.shiftassistant.widget.ShiftWidgetReceiver
@@ -69,6 +71,19 @@ fun SettingsScreen(container: AppContainer) {
     var showImportConfirm by remember { mutableStateOf(false) }
     var showWidgetGuide by remember { mutableStateOf(false) }
     var showClearCalendarConfirm by remember { mutableStateOf(false) }
+
+    // 日历同步目标(会话8:写入系统自带日历,可手动更换)
+    var targetCalendarName by remember { mutableStateOf<String?>(null) }
+    var showCalendarPicker by remember { mutableStateOf(false) }
+    var calendarOptions by remember { mutableStateOf<List<CalendarOption>>(emptyList()) }
+
+    LaunchedEffect(calendarSyncOn) {
+        targetCalendarName = if (calendarSyncOn) {
+            runCatching { calendarSync.currentTargetName() }.getOrNull()
+        } else {
+            null
+        }
+    }
 
     // 日历权限请求(开启同步 / 立即同步时用)
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -249,10 +264,36 @@ fun SettingsScreen(container: AppContainer) {
                     }
                     DashedDivider()
                     Text(
-                        "把今天及未来的班次写入系统日历,桌面「日程」卡片即可显示班次。需在日历应用中将「班表助手」日历设为可见。",
+                        "把今天及未来的班次写入系统日历,桌面「日程」卡片即可显示班次。班次会写入下方选择的日历(默认自动选择系统本地日历),请确保该日历在日历应用中对勾可见。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    DashedDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "同步目标日历",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                targetCalendarName ?: "自动选择中…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = {
+                            scope.launch {
+                                calendarOptions = runCatching { calendarSync.listWritableCalendars() }
+                                    .getOrDefault(emptyList())
+                                showCalendarPicker = true
+                            }
+                        }) {
+                            Text("更换")
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedButton(
@@ -386,12 +427,59 @@ fun SettingsScreen(container: AppContainer) {
         )
     }
 
+    // 选择同步目标日历
+    if (showCalendarPicker) {
+        AlertDialog(
+            onDismissRequest = { showCalendarPicker = false },
+            title = { Text("选择同步目标日历") },
+            text = {
+                if (calendarOptions.isEmpty()) {
+                    Text("没有可写入的日历。")
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .verticalScroll(rememberScrollState())
+                            .selectableGroup()
+                    ) {
+                        calendarOptions.forEach { option ->
+                            SettingsRadioRow(
+                                text = option.displayName +
+                                    if (option.accountName.isNotBlank()) "(${option.accountName})" else "",
+                                selected = false,
+                                onClick = {
+                                    showCalendarPicker = false
+                                    scope.launch {
+                                        calendarSync.selectCalendar(option.id)
+                                        val n = runCatching { calendarSync.syncNow() }.getOrDefault(0)
+                                        targetCalendarName = option.displayName
+                                        Toast.makeText(
+                                            context,
+                                            if (n > 0) {
+                                                "已切换到「${option.displayName}」并同步 $n 个班次"
+                                            } else {
+                                                "已选择日历,没有需要同步的班次"
+                                            },
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCalendarPicker = false }) { Text("取消") }
+            }
+        )
+    }
+
     // 清除已同步日历事件确认
     if (showClearCalendarConfirm) {
         AlertDialog(
             onDismissRequest = { showClearCalendarConfirm = false },
             title = { Text("清除同步事件") },
-            text = { Text("确定清除日历中所有「班表助手」写入的事件?") },
+            text = { Text("确定清除日历中所有由「班表助手」写入的班次事件?") },
             confirmButton = {
                 TextButton(onClick = {
                     showClearCalendarConfirm = false

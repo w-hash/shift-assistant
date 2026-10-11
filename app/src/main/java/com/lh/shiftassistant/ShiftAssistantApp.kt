@@ -44,9 +44,13 @@ class ShiftAssistantApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
-        // 首次启动预置人员与班次
+        // 首次启动预置人员与班次;之后若已开启日历同步,启动时兜底同步一次
+        // (补上"编辑后立即退出"可能丢失的防抖同步;若日历被系统清理也能自动重建)
         container.appScope.launch {
             runCatching { container.shiftRepository.ensureDefaults() }
+            if (container.settingsRepository.calendarSyncEnabledOnce()) {
+                runCatching { container.calendarSyncManager.syncNow() }
+            }
         }
     }
 }
